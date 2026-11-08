@@ -1,4 +1,5 @@
 import { Client, FluxerAPIError } from "talos-fluxer";
+import { runCode, compileCode, languages, type Output } from "./godbolt";
 
 const token = process.env.FLUXER_BOT_TOKEN;
 if (!token) {
@@ -55,6 +56,27 @@ client.on("messageCreate", async (message) => {
   if (content === `${prefix}help`) {
     await message.reply(`Commands: ${prefix}ping, ${prefix}help`);
   }
+
+  if (content.startsWith(`${prefix}run`)) {
+    const parts = parseFence(content.slice(`${prefix}run`.length));
+    if (parts.err) {
+      await message.reply(parts.err);
+      return;
+    }
+    const out = await runCode(parts.lang, parts.code);
+    await message.reply(formatOutput("run", out));
+    return;
+  }
+  if (content.startsWith(`${prefix}compile`)) {
+    const parts = parseFence(content.slice(`${prefix}compile`.length));
+    if (parts.err) {
+      await message.reply(parts.err);
+      return;
+    }
+    const out = await compileCode(parts.lang, parts.code);
+    await message.reply(formatOutput("compile", out));
+    return;
+  }
 });
 
 process.once("SIGINT", () => {
@@ -67,3 +89,85 @@ process.once("SIGTERM", () => {
 });
 
 await client.connect({ timeoutMs: 30_000 });
+
+interface FencedCode {
+  lang: string;
+  code: string;
+  err: string;
+}
+
+function parseFence(raw: string): FencedCode {
+  const empty: FencedCode = { lang: "", code: "", err: "" };
+
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    empty.err = "usage: /run <lang> then a codeblock";
+    return empty;
+  }
+
+  // first word is langauge
+  const spaceAt = trimmed.indexOf(" ");
+  const newlineAt = trimmed.indexOf("\n");
+  let langEnd = trimmed.length;
+  if (spaceAt >= 0 && (newlineAt < 0 || spaceAt < newlineAt)) langEnd = spaceAt;
+  if (newlineAt >= 0 && newlineAt < langEnd) langEnd = newlineAt;
+
+  const lang = trimmed.slice(0, langEnd).toLowerCase();
+
+  if (!languages[lang]) {
+    empty.err = `unknown language '${lang}'. supported: ${Object.keys(languages).join(", ")}`;
+    return empty;
+  }
+
+  const rest = trimmed.slice(langEnd).trim();
+
+  const fenceStart = rest.indexOf("```");
+  if (fenceStart < 0) {
+    empty.err = "send code in a ``` fenced block";
+    return empty;
+  }
+
+  let afterOpen = fenceStart + 3;
+  while (afterOpen < rest.length && rest[afterOpen] != "\n") afterOpen++;
+  if (afterOpen >= rest.length) {
+    empty.err = "code block is not closed";
+    return empty;
+  }
+  afterOpen++;
+
+  const fenceEnd = rest.indexOf("```", afterOpen);
+  if (fenceEnd < 0) {
+    empty.err = "code block is not closed";
+    return empty;
+  }
+
+  const code = rest.slice(afterOpen, fenceEnd);
+  if (!code.trim()) {
+    empty.err = "code block is empty";
+    return empty;
+  }
+
+  return { lang: lang, code: code, err: "" };
+
+}
+
+// turns output into reply string
+function formatOutput(kind:string,out:Output):string{
+  if (out.err){
+    return `**${kind} error:** ${out.err}`;
+  }
+
+  const parts: string[] = [];
+  if (out.stdout) parts.push("**stdout:**\n```\n"+truncate(out.stdout)+"\n```");
+  if (out.stderr) parts.push("**stderr:**\n```\n"+truncate(out.stderr)+"\n```")
+
+  parts.push(`exit: ${out.code}`);
+
+  return parts.join("\n");
+}
+
+function truncate(s: string): string {
+  const MAX = 1500;
+  if (s.length <= MAX) return s;
+  return s.slice(0, MAX) + "\n... (truncated)";
+}
