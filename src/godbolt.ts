@@ -71,6 +71,9 @@ export const languages: Record<string, string> = {
   go: "gl12212", // x86-64 gc 1.22.12
   javascript: "v8113", // v8 11.3 (godbolt has no Node.js)
   zig: "z0140", // zig 0.14.0
+  lua: "lua550", // Lua 5.5.0
+  haskell: "ghc9122", // x86-64 ghc 9.12.2
+  asm: "gnuas151", // x86-64 binutils 2.45 (GNU assembler)
 };
 
 export interface Output{
