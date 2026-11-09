@@ -74,6 +74,16 @@ export const languages: Record<string, string> = {
   lua: "lua550", // Lua 5.5.0
   haskell: "ghc9122", // x86-64 ghc 9.12.2
   asm: "gnuas151", // x86-64 binutils 2.45 (GNU assembler)
+  rust: "r1990", // rustc 1.99.0
+  java: "java2700", // jdk 27.0.0
+  typescript: "tsc_0_0_35_nogc", // TypeScript Native Compiler 0.0.pre35 (No GC)
+  ruby: "ruby405", // Ruby 4.0.5
+  csharp: "dotnet100csharpcoreclr", // .NET 10.0 CoreCLR
+  kotlin: "kotlinc2421", // kotlinc 2.4.21
+  dart: "dart3136", // Dart 3.13.6
+  julia: "julia_1_12_5", // Julia 1.12.5
+  ocaml: "ocaml5502flambda", // x86-64 ocamlopt 5.5.2-flambda
+  gleam: "gleam1181javascript", // Gleam 1.18.1 (JavaScript)
 };
 
 export interface Output{
