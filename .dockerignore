@@ -4,3 +4,4 @@ node_modules/
 .gitignore
 *.md
 .DS_Store
+data/

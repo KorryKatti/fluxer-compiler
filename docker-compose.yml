@@ -5,4 +5,13 @@ services:
     env_file: .env
     environment:
       NODE_ENV: production
+      DATA_DIR: /app/data
+    volumes:
+      # persist cooldowns.json in a named volume (Docker manages
+      # ownership, so no host data/ dir needs to exist beforehand)
+      # i stil have lot to learn about docker
+      - bot-data:/app/data
     restart: unless-stopped
+
+volumes:
+  bot-data:

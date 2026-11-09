@@ -6,9 +6,16 @@ WORKDIR /app
 COPY package.json bun.lock* ./
 RUN bun install --frozen-lockfile --production
 
-# Copy source
-COPY . .
+# Copy source, owned by the non-root bun user (uid 1000)
+COPY --chown=bun:bun . .
 
-ENV NODE_ENV=production
+
+RUN mkdir -p /app/data && chown bun:bun /app/data
+
+ENV NODE_ENV=production \
+    HOME=/home/bun \
+    DATA_DIR=/app/data
+
+USER bun
 
 CMD ["bun", "run", "src/index.ts"]
