@@ -3,6 +3,7 @@
 
 import { renameSync } from "node:fs";
 import { join } from "node:path";
+import { logError } from "./log";
 
 export const COOLDOWN_MS = Number(process.env.COOLDOWN_MS ?? 60_000);
 const DATA_DIR = process.env.DATA_DIR ?? "data";
@@ -25,7 +26,7 @@ export async function loadCooldowns(): Promise<void> {
     }
     store = loaded;
   } catch (e) {
-    console.error(`cooldown: could not read ${FILE}, starting fresh`, e);
+    logError("cooldown: could not read", e, FILE);
     store = {};
   }
 }
@@ -40,7 +41,7 @@ async function save(now: number): Promise<void> {
     await Bun.write(tmp, JSON.stringify(store, null, 2));
     renameSync(tmp, FILE);
   } catch (e) {
-    console.error("cooldown: could not save", e);
+    logError("cooldown: could not save", e, FILE);
   }
 }
 

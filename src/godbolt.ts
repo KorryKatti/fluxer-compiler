@@ -1,14 +1,76 @@
-const BASE = "https://godbolt.org/api"
-const UA = "fluxer-compiler-bot/1.0"
+const BASE_URL = "https://godbolt.org/api"
+const USER_AGENT = "fluxer-compiler-bot/1.0"
 
-// will verify and fill later
+// global cap on simultaneous godbolt requests (FIFO): extra callers
+// wait their turn instead of bursting godbolt. The 20s fetch timeout
+// starts only once a slot is acquired, not while queued.
+export const MAX_IN_FLIGHT =
+	Number.isFinite(Number(process.env.MAX_IN_FLIGHT)) &&
+	Number(process.env.MAX_IN_FLIGHT) > 0
+		? Number(process.env.MAX_IN_FLIGHT)
+		: 5;
+
+let inFlight = 0;
+const waiters: (() => void)[] = [];
+
+async function acquire(): Promise<void> {
+	if (inFlight < MAX_IN_FLIGHT) {
+		inFlight++;
+		return;
+	}
+	// woken by release(), which hands its slot directly to us,
+	// so inFlight is intentionally not incremented here
+	await new Promise<void>((resolve) => waiters.push(resolve));
+}
+
+function release(): void {
+	const next = waiters.shift();
+	if (next) {
+		next(); // slot transfers to the next waiter, inFlight unchanged
+	} else {
+		inFlight--;
+	}
+}
+
+// global "phone line busy" cap: token bucket across all users,
+// ~GLOBAL_RATE_PER_MIN requests/minute sustained (default 30 = 1 per 2s),
+export const GLOBAL_RATE_PER_MIN =
+	Number.isFinite(Number(process.env.GLOBAL_RATE_PER_MIN)) &&
+	Number(process.env.GLOBAL_RATE_PER_MIN) > 0
+		? Number(process.env.GLOBAL_RATE_PER_MIN)
+		: 30;
+const REFILL_MS = 60_000 / GLOBAL_RATE_PER_MIN;
+let tokens = MAX_IN_FLIGHT;
+let lastRefill = Date.now();
+
+function refill(now: number): void {
+	const elapsed = now - lastRefill;
+	if (elapsed <= 0) return;
+	tokens = Math.min(MAX_IN_FLIGHT, tokens + elapsed / REFILL_MS);
+	lastRefill = now;
+}
+
+/** ms until a global slot is free, 0 if one is available now. Does not consume. */
+export function globalLimitWaitMs(now = Date.now()): number {
+	refill(now);
+	return tokens >= 1 ? 0 : Math.ceil((1 - tokens) * REFILL_MS);
+}
+
+/** Spend one global token if available. Synchronous, so no race between peek and spend. */
+export function consumeGlobalLimit(now = Date.now()): boolean {
+	if (globalLimitWaitMs(now) > 0) return false;
+	tokens--;
+	return true;
+}
+
+// verified against https://godbolt.org/api/compilers (2026)
 export const languages: Record<string, string> = {
-  cpp: "g132",
-  c: "cg132",
-  python: "python312",
-  go: "gl1220",
-  javascript: "nodejs2011",
-  zig: "zig0170",
+  cpp: "g132", // x86-64 gcc 13.2 (c++)
+  c: "cg132", // x86-64 gcc 13.2 (c)
+  python: "python312", // Python 3.12
+  go: "gl12212", // x86-64 gc 1.22.12
+  javascript: "v8113", // v8 11.3 (godbolt has no Node.js)
+  zig: "z0140", // zig 0.14.0
 };
 
 export interface Output{
@@ -71,17 +133,19 @@ interface GodboltResp{
 	code:number;
 	stdout:TextLine[];
 	stderr:TextLine[];
+	// assembly output, only present when execute is false
+	asm?:TextLine[];
 	execResult?:ExecResult;
 }
 
 function joinText(lines:TextLine[]|undefined):string {
 	if (!lines) return "";
-	let out = "";
-	// switched to vscode
-	for (const l of lines){
-		out+=l.text;
-	}
-	return out;
+	// godbolt lines carry no trailing newline, so join them explicitly;
+	// also strip ANSI colour codes from compiler diagnostics
+	return lines
+		.map((l) => l.text)
+		.join("\n")
+		.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "");
 }
 
 // post to godbolt and return parsed body or error
@@ -93,9 +157,10 @@ async function makeRequest(
 	body:GodboltReq,
 ): Promise<{resp:GodboltResp | null;err:string}>{
 	const url = `${BASE_URL}/compiler/${compilerId}/compile`;
-	let res: Response;
+	await acquire();
 	try {
-		res = await fetch (url,{
+		// timeout starts here, after acquiring a slot, not while queued
+		const res = await fetch (url,{
 			method:"POST",
 			headers:{
 				"Content-Type":"application/json",
@@ -105,11 +170,19 @@ async function makeRequest(
 			body:JSON.stringify(body),
 			signal:AbortSignal.timeout(20_000),
 		});
+		if (!res.ok){
+			return {resp:null,err:`godbolt returned ${res.status}`};
+		}
+		try {
+			const resp = (await res.json()) as GodboltResp;
+			return {resp,err:""};
+		} catch (e){
+			return {resp:null,err:`invalid response: ${String(e)}`};
+		}
 	} catch (e){
 		return { resp:null,err:`request failed: ${String(e)}`};
-	}
-	if (!res.ok){
-		return {resp:null,err:`godbolt returned ${res.status}`};
+	} finally {
+		release();
 	}
 }
 
@@ -148,8 +221,12 @@ export async function runCode(lang:string,source:string):Promise<Output>{
 	// execResult holds run step
 	const exec = resp.execResult;
 	if (!exec){
-		o.err="no execResult (compiler may not support execution)";
+		o.stdout=joinText(resp.stdout);
 		o.stderr=joinText(resp.stderr);
+		o.code=resp.code;
+		if (resp.code===0){
+			o.err="no execResult (compiler may not support execution)";
+		}
 		return o;
 	}
 
@@ -186,6 +263,8 @@ export async function compileCode(
 
 	const o = blank();
 	o.ok = true;
+	// assembly lives in `asm`, not stdout, when not executing
+	if (resp.code===0) o.stdout= joinText(resp.asm);
 	o.stderr= joinText(resp.stderr);
 	o.code = resp.code;
 	return o;
