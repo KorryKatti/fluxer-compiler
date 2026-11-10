@@ -327,7 +327,19 @@ async function gateCooldown(message: Message): Promise<boolean> {
   // both clear: spend both budgets (no await between peek and spend,
   // so a concurrent request can't slip in)
   consumeGlobalLimit(now);
-  await checkCooldown(message.author.id, now);
+  const cd = await checkCooldown(message.author.id, now);
+  if (!cd.ok) {
+    await message.reply({
+      embeds: [
+        {
+          title: "Slow down",
+          description: `You can use ${prefix}run / ${prefix}compile again in ${Math.ceil(cd.retryAfterMs / 1000)}s.`,
+          color: COLOR_WARN,
+        },
+      ],
+    });
+    return false;
+  }
   return true;
 }
 
