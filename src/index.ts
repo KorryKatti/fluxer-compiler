@@ -409,6 +409,11 @@ function helpEmbed(): Embed {
         name: "Example",
         value: `${prefix}run\n\`\`\`python\nprint("hello from fluxer-compiler")\n\`\`\``,
       },
+      {
+        name: "Links",
+        value:
+          "[Invite](https://fluxer.com/oauth2/authorize?client_id=1568678169844649988&scope=bot&permissions=281664) • [Support server](https://fluxer.gg/s1evrala) • [GitHub](https://github.com/korrykatti/fluxer-compiler)",
+      },
     ],
   };
 }
