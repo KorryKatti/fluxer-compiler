@@ -172,25 +172,43 @@ function parseFence(raw: string, cmd: string): FencedCode {
 
   const trimmed = raw.trim();
   if (!trimmed) {
-    empty.err = `usage: ${cmd} <lang> followed by a fenced code block`;
+    empty.err = `usage: ${cmd} <lang> followed by a fenced code block, or ${cmd} with a fenced code block containing the language`;
     return empty;
   }
 
-  // first word is langauge
+  // Try explicit language first: ${cmd} <lang> ...
   const spaceAt = trimmed.indexOf(" ");
   const newlineAt = trimmed.indexOf("\n");
   let langEnd = trimmed.length;
   if (spaceAt >= 0 && (newlineAt < 0 || spaceAt < newlineAt)) langEnd = spaceAt;
   if (newlineAt >= 0 && newlineAt < langEnd) langEnd = newlineAt;
 
-  const lang = trimmed.slice(0, langEnd).toLowerCase();
+  const explicitLang = trimmed.slice(0, langEnd).toLowerCase();
+  const restAfterExplicit = trimmed.slice(langEnd).trim();
 
-  if (!languages[lang]) {
-    empty.err = `unknown language '${lang}'. supported: ${Object.keys(languages).join(", ")}`;
+  // If explicit lang is valid, use it and parse code block from rest
+  if (languages[explicitLang]) {
+    const parsed = extractCodeBlock(restAfterExplicit, explicitLang);
+    if (!parsed.err) return parsed;
+    // If explicit lang given but code block parsing failed, fall through to infer from fence
+  }
+
+  // Fallback: infer language from first fenced code block with a language tag
+  const inferred = extractFirstFencedBlock(trimmed);
+  if (inferred) return inferred;
+
+  // If explicit lang was given but invalid, report that error
+  if (explicitLang && !languages[explicitLang]) {
+    empty.err = `unknown language '${explicitLang}'. supported: ${Object.keys(languages).join(", ")}`;
     return empty;
   }
 
-  const rest = trimmed.slice(langEnd).trim();
+  empty.err = "send code in a ``` fenced block with a language tag (e.g. ```c)";
+  return empty;
+}
+
+function extractCodeBlock(rest: string, lang: string): FencedCode {
+  const empty: FencedCode = { lang: "", code: "", err: "" };
 
   const fenceStart = rest.indexOf("```");
   if (fenceStart < 0) {
@@ -218,8 +236,46 @@ function parseFence(raw: string, cmd: string): FencedCode {
     return empty;
   }
 
-  return { lang: lang, code: code, err: "" };
+  return { lang, code, err: "" };
+}
 
+function extractFirstFencedBlock(text: string): FencedCode | null {
+  let searchPos = 0;
+  while (true) {
+    const fenceStart = text.indexOf("```", searchPos);
+    if (fenceStart < 0) return null;
+
+    let afterOpen = fenceStart + 3;
+    // read language tag (until newline or end)
+    let langEnd = afterOpen;
+    while (langEnd < text.length && text[langEnd] !== "\n") langEnd++;
+    const lang = text.slice(afterOpen, langEnd).trim().toLowerCase();
+
+    if (langEnd >= text.length) {
+      searchPos = fenceStart + 3;
+      continue;
+    }
+    afterOpen = langEnd + 1; // skip newline
+
+    const fenceEnd = text.indexOf("```", afterOpen);
+    if (fenceEnd < 0) {
+      searchPos = fenceStart + 3;
+      continue;
+    }
+
+    const code = text.slice(afterOpen, fenceEnd);
+    if (!code.trim()) {
+      searchPos = fenceStart + 3;
+      continue;
+    }
+
+    if (!languages[lang]) {
+      searchPos = fenceStart + 3;
+      continue;
+    }
+
+    return { lang, code, err: "" };
+  }
 }
 
 type Embed = NonNullable<MessageCreate["embeds"]>[number];
@@ -332,14 +388,14 @@ function helpEmbed(): Embed {
         value: "Check if the bot is online — uptime, memory, CPU, gateway latency",
       },
       { name: `${prefix}help`, value: "Show this help" },
-      { name: `${prefix}run <lang>`, value: "Run code in a fenced block" },
-      { name: `${prefix}compile <lang>`, value: "Compile code in a fenced block" },
+      { name: `${prefix}run [lang]`, value: "Run code in a fenced block (lang can be inferred from the fence tag)" },
+      { name: `${prefix}compile [lang]`, value: "Compile code in a fenced block (lang can be inferred from the fence tag)" },
       { name: "Languages", value: langs },
       { name: "Cooldown", value: "1 minute between run/compile, per user" },
       { name: "Rate limit", value: "~30 run/compile per minute across everyone" },
       {
         name: "Example",
-        value: `${prefix}run python\n\`\`\`python\nprint("hello from fluxer-compiler")\n\`\`\``,
+        value: `${prefix}run\n\`\`\`python\nprint("hello from fluxer-compiler")\n\`\`\``,
       },
     ],
   };
