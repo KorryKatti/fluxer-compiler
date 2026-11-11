@@ -22,6 +22,7 @@ import {
   snapshot,
   startedAt,
 } from "./stats";
+import { isFunTrigger, loadFunConfig, toggleFun } from "./fun";
 
 //vscode format fucke dit up
 
@@ -92,9 +93,25 @@ client.on("error", (error) => {
 client.on("messageCreate", async (message) => {
   try {
     if (message.author.bot) return;
-    counters.messages++;
 
     const content = message.content.trim();
+
+    if (content.toLowerCase() === `${prefix}fun`.toLowerCase()) {
+      const enabled = await toggleFun(message.channelId);
+      if (enabled !== null) {
+        await message.reply({
+          content: `Fun responses: ${enabled ? "on" : "off"}`,
+        });
+      }
+      return;
+    }
+
+    if (isFunTrigger(message.channelId, content)) {
+      await message.reply({
+        content: "It's called communities!!!!1111111111!!!",
+      });
+      return;
+    }
 
     if (content === `${prefix}ping`) {
       counters.pings++;
@@ -159,6 +176,7 @@ process.once("SIGTERM", () => {
 });
 
 await loadCooldowns();
+await loadFunConfig();
 await client.connect({ timeoutMs: 30_000 });
 
 interface FencedCode {
@@ -345,14 +363,17 @@ async function gateCooldown(message: Message): Promise<boolean> {
 
 function pingEmbed(): Embed {
   const s = snapshot();
-  const heapPct =
-    s.heapTotal > 0 ? Math.round((s.heapUsed / s.heapTotal) * 100) : 0;
-  const hostUsed = s.hostTotalMem - s.hostFreeMem;
   const load = s.loadAvg.map((n) => n.toFixed(2)).join(", ");
   const connected =
     connectedAt !== null
       ? `Connected ${formatDuration(Date.now() - connectedAt)} ago`
       : "Not connected";
+  const gatewayLines = [
+    String(client.gateway.state),
+    connected,
+    `Heartbeat ${gatewayLatencyMs !== null ? `${gatewayLatencyMs} ms` : "n/a"}`,
+  ];
+  if (reconnects > 0) gatewayLines.push(`Reconnects ${reconnects}`);
 
   return {
     title: "Pong!",
@@ -361,27 +382,27 @@ function pingEmbed(): Embed {
     fields: [
       {
         name: "Uptime",
-        value: `${formatDuration(s.uptimeMs)}\nsince ${new Date(startedAt).toISOString()}`,
+        value: formatDuration(s.uptimeMs),
       },
       {
         name: "Memory",
-        value: `RSS ${formatBytes(s.rss)}\nHeap ${formatBytes(s.heapUsed)} / ${formatBytes(s.heapTotal)} (${heapPct}%)\nExternal ${formatBytes(s.external)}`,
+        value: `RSS ${formatBytes(s.rss)}`,
       },
       {
         name: "CPU",
-        value: `${(s.cpuUserSec + s.cpuSystemSec).toFixed(1)}s total (user ${s.cpuUserSec.toFixed(1)}s, sys ${s.cpuSystemSec.toFixed(1)}s)\nLoad ${load}`,
+        value: `${(s.cpuUserSec + s.cpuSystemSec).toFixed(1)}s total\nLoad ${load}`,
       },
       {
         name: "Gateway",
-        value: `${client.gateway.state}\n${connected}\nHeartbeat ${gatewayLatencyMs !== null ? `${gatewayLatencyMs} ms` : "n/a"}\nReconnects ${reconnects}`,
+        value: gatewayLines.join("\n"),
       },
       {
         name: "System",
-        value: `${s.platform} ${s.arch} · Bun ${s.bunVersion} · pid ${s.pid}\nHost RAM ${formatBytes(hostUsed)} / ${formatBytes(s.hostTotalMem)} used`,
+        value: `${s.platform} ${s.arch} · Bun ${s.bunVersion}`,
       },
       {
         name: "Usage (since boot)",
-        value: `${counters.messages} messages · ${counters.pings} ping · ${counters.runs} run · ${counters.compiles} compile · ${counters.errors} errors`,
+        value: `${counters.pings} ping · ${counters.runs} run · ${counters.compiles} compile · ${counters.errors} errors`,
       },
     ],
   };

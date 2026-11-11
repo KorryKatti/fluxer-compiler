@@ -7,7 +7,6 @@ export const startedAt = Date.now();
 
 /** Simple in-memory tallies since boot. Reset on restart, by design. */
 export const counters = {
-  messages: 0,
   pings: 0,
   runs: 0,
   compiles: 0,
